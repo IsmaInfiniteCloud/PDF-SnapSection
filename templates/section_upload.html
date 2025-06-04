@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Section Extractor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="file"]:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .flash-messages {
+            margin-bottom: 20px;
+        }
+        .flash-message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .flash-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .instructions {
+            background-color: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #0066cc;
+        }
+        .features {
+            background-color: #f8f9fa;
+            border-left: 4px solid #4CAF50;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .step-number {
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✂️ PDF Section Extractor</h1>
+        
+        <div class="instructions">
+            <h3>Instructions :</h3>
+            <div class="step">
+                <div class="step-number">1</div>
+                <div>Téléchargez votre fichier PDF</div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div>Sélectionnez la page contenant la section désirée</div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div>Dessinez un rectangle autour de la zone à extraire</div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div>Téléchargez la section extraite en haute résolution</div>
+            </div>
+            
+            <div class="features">
+                <strong>Fonctionnalités :</strong><br>
+                • Sélection précise avec la souris<br>
+                • Extraction en haute résolution<br>
+                • Formats de sortie : PNG ou PDF<br>
+                • Sélection multiple sur différentes pages<br>
+                • Prévisualisation avant extraction
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for message in messages %}
+                        <div class="flash-message flash-error">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <form method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">Sélectionner le fichier PDF :</label>
+                <input type="file" name="file" id="file" accept=".pdf" required>
+            </div>
+            
+            <button type="submit">📄 Ouvrir pour sélection</button>
+        </form>
+    </div>
+</body>
+</html>

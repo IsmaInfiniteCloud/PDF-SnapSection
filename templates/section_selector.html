@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sélection de sections - {{ filename }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .page-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="number"], select {
+            padding: 8px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        .btn-primary {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #45a049;
+        }
+        .btn-secondary {
+            background-color: #2196F3;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #1976D2;
+        }
+        .btn-danger {
+            background-color: #f44336;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #d32f2f;
+        }
+        .main-content {
+            display: flex;
+            gap: 20px;
+        }
+        .pdf-viewer {
+            flex: 1;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            min-height: 600px;
+        }
+        .sidebar {
+            width: 300px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            height: fit-content;
+        }
+        #pdf-container {
+            position: relative;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            overflow: auto;
+            background-color: #f9f9f9;
+            min-height: 500px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #pdf-image {
+            display: block;
+            max-width: 100%;
+            cursor: crosshair;
+        }
+        .selection-box {
+            position: absolute;
+            border: 2px solid #ff0000;
+            background-color: rgba(255, 0, 0, 0.1);
+            pointer-events: none;
+        }
+        .selections-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .selection-item {
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .selection-item.active {
+            border-color: #4CAF50;
+            background-color: #e8f5e8;
+        }
+        .selection-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .selection-actions {
+            display: flex;
+            gap: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .instructions {
+            background-color: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        .zoom-controls {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h2>📄 {{ filename }}</h2>
+            <small>{{ total_pages }} page(s) au total</small>
+        </div>
+        
+        <div class="controls">
+            <div class="page-controls">
+                <label>Page:</label>
+                <input type="number" id="page-input" min="1" max="{{ total_pages }}" value="1">
+                <button onclick="loadPage()" class="btn-secondary">Charger</button>
+            </div>
+            
+            <div class="zoom-controls">
+                <label>Zoom:</label>
+                <select id="zoom-select" onchange="changeZoom()">
+                    <option value="1">100%</option>
+                    <option value="1.5" selected>150%</option>
+                    <option value="2">200%</option>
+                    <option value="2.5">250%</option>
+                </select>
+            </div>
+            
+            <div>
+                <label>Format:</label>
+                <select id="format-select">
+                    <option value="png">PNG (Image)</option>
+                    <option value="pdf">PDF</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="pdf-viewer">
+            <div id="pdf-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Chargement de la page...
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="instructions">
+                <strong>Instructions:</strong><br>
+                1. Cliquez et faites glisser pour sélectionner une zone<br>
+                2. Ajoutez plusieurs sélections si nécessaire<br>
+                3. Cliquez sur "Extraire" pour télécharger
+            </div>
+
+            <h3>Sélections ({{ 0 }})</h3>
+            <div id="selections-list" class="selections-list">
+                <p class="text-center text-muted">Aucune sélection pour le moment</p>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button onclick="clearAllSelections()" class="btn-danger" style="width: 100%; margin-bottom: 10px;">
+                    🗑️ Effacer tout
+                </button>
+                <button onclick="debugSelections()" class="btn-secondary" style="width: 100%; margin-bottom: 10px;" id="debug-btn">
+                    🔍 Debug Info
+                </button>
+                <button onclick="extractSelections()" class="btn-primary" style="width: 100%;" id="extract-btn" disabled>
+                    📥 Extraire sélections
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileData = '{{ file_data }}';
+        const totalPages = {{ total_pages }};
+        let currentPage = 0;
+        let currentZoom = 1.5;
+        let selections = [];
+        let isSelecting = false;
+        let selectionStart = { x: 0, y: 0 };
+        let currentSelection = null;
+        let pageWidth = 0;
+        let pageHeight = 0;
+
+        // Load initial page
+        window.onload = function() {
+            loadPage();
+        };
+
+        function loadPage() {
+            const pageNum = parseInt(document.getElementById('page-input').value) - 1;
+            const zoom = parseFloat(document.getElementById('zoom-select').value);
+            
+            if (pageNum < 0 || pageNum >= totalPages) {
+                alert('Numéro de page invalide');
+                return;
+            }
+
+            document.getElementById('pdf-container').innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Chargement de la page ${pageNum + 1}...
+                </div>
+            `;
+
+            fetch('/get_page_image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    file_data: fileData,
+                    page_num: pageNum,
+                    zoom: zoom
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentPage = pageNum;
+                    currentZoom = data.zoom;
+                    pageWidth = data.page_width;
+                    pageHeight = data.page_height;
+                    
+                    const img = new Image();
+                    img.onload = function() {
+                        document.getElementById('pdf-container').innerHTML = '';
+                        img.id = 'pdf-image';
+                        img.style.cursor = 'crosshair';
+                        document.getElementById('pdf-container').appendChild(img);
+                        setupSelectionEvents();
+                        redrawSelections();
+                    };
+                    img.src = data.image;
+                } else {
+                    document.getElementById('pdf-container').innerHTML = 
+                        `<div class="loading">Erreur: ${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('pdf-container').innerHTML = 
+                    `<div class="loading">Erreur de chargement: ${error.message}</div>`;
+            });
+        }
+
+        function changeZoom() {
+            loadPage();
+        }
+
+        function setupSelectionEvents() {
+            const container = document.getElementById('pdf-container');
+            const img = document.getElementById('pdf-image');
+
+            img.onmousedown = function(e) {
+                e.preventDefault();
+                isSelecting = true;
+                
+                const rect = img.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                
+                selectionStart = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
+
+                currentSelection = document.createElement('div');
+                currentSelection.className = 'selection-box';
+                currentSelection.style.left = selectionStart.x + 'px';
+                currentSelection.style.top = selectionStart.y + 'px';
+                currentSelection.style.width = '0px';
+                currentSelection.style.height = '0px';
+                container.appendChild(currentSelection);
+            };
+
+            img.onmousemove = function(e) {
+                if (!isSelecting) return;
+                
+                e.preventDefault();
+                const rect = img.getBoundingClientRect();
+                
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+                
+                const width = Math.abs(currentX - selectionStart.x);
+                const height = Math.abs(currentY - selectionStart.y);
+                const left = Math.min(currentX, selectionStart.x);
+                const top = Math.min(currentY, selectionStart.y);
+                
+                currentSelection.style.left = left + 'px';
+                currentSelection.style.top = top + 'px';
+                currentSelection.style.width = width + 'px';
+                currentSelection.style.height = height + 'px';
+            };
+
+            img.onmouseup = function(e) {
+                if (!isSelecting) return;
+                
+                isSelecting = false;
+                
+                const rect = img.getBoundingClientRect();
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+                
+                const width = Math.abs(currentX - selectionStart.x);
+                const height = Math.abs(currentY - selectionStart.y);
+                const left = Math.min(currentX, selectionStart.x);
+                const top = Math.min(currentY, selectionStart.y);
+                
+                // Only add selection if it's big enough
+                if (width > 10 && height > 10) {
+                    const selection = {
+                        page: currentPage,
+                        x: left,
+                        y: top,
+                        width: width,
+                        height: height,
+                        zoom: currentZoom,
+                        id: Date.now()
+                    };
+                    
+                    selections.push(selection);
+                    updateSelectionsList();
+                    updateExtractButton();
+                } else {
+                    // Remove the selection box if too small
+                    container.removeChild(currentSelection);
+                }
+                
+                currentSelection = null;
+            };
+        }
+
+        function redrawSelections() {
+            const container = document.getElementById('pdf-container');
+            
+            // Remove existing selection boxes
+            const existingBoxes = container.querySelectorAll('.selection-box');
+            existingBoxes.forEach(box => container.removeChild(box));
+            
+            // Redraw selections for current page
+            selections.filter(s => s.page === currentPage).forEach(selection => {
+                const box = document.createElement('div');
+                box.className = 'selection-box';
+                box.style.left = selection.x + 'px';
+                box.style.top = selection.y + 'px';
+                box.style.width = selection.width + 'px';
+                box.style.height = selection.height + 'px';
+                box.dataset.selectionId = selection.id;
+                container.appendChild(box);
+            });
+        }
+
+        function updateSelectionsList() {
+            const listContainer = document.getElementById('selections-list');
+            const headerTitle = document.querySelector('.sidebar h3');
+            
+            headerTitle.textContent = `Sélections (${selections.length})`;
+            
+            if (selections.length === 0) {
+                listContainer.innerHTML = '<p class="text-center text-muted">Aucune sélection pour le moment</p>';
+                return;
+            }
+            
+            let html = '';
+            selections.forEach((selection, index) => {
+                html += `
+                    <div class="selection-item" data-selection-id="${selection.id}">
+                        <div class="selection-info">
+                            <strong>Section ${index + 1}</strong><br>
+                            Page: ${selection.page + 1}<br>
+                            Position: (${Math.round(selection.x)}, ${Math.round(selection.y)})<br>
+                            Taille: ${Math.round(selection.width)}×${Math.round(selection.height)}px
+                        </div>
+                        <div class="selection-actions">
+                            <button onclick="goToSelection(${selection.id})" class="btn-secondary" style="font-size: 11px;">
+                                👁️ Voir
+                            </button>
+                            <button onclick="removeSelection(${selection.id})" class="btn-danger" style="font-size: 11px;">
+                                🗑️ Supprimer
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            listContainer.innerHTML = html;
+        }
+
+        function updateExtractButton() {
+            const button = document.getElementById('extract-btn');
+            button.disabled = selections.length === 0;
+        }
+
+        function goToSelection(selectionId) {
+            const selection = selections.find(s => s.id === selectionId);
+            if (!selection) return;
+            
+            // Change page if necessary
+            if (selection.page !== currentPage) {
+                document.getElementById('page-input').value = selection.page + 1;
+                loadPage();
+            }
+            
+            // Highlight the selection
+            setTimeout(() => {
+                const selectionItems = document.querySelectorAll('.selection-item');
+                selectionItems.forEach(item => item.classList.remove('active'));
+                
+                const targetItem = document.querySelector(`[data-selection-id="${selectionId}"]`);
+                if (targetItem) {
+                    targetItem.classList.add('active');
+                }
+            }, 100);
+        }
+
+        function removeSelection(selectionId) {
+            selections = selections.filter(s => s.id !== selectionId);
+            updateSelectionsList();
+            updateExtractButton();
+            redrawSelections();
+        }
+
+        function clearAllSelections() {
+            if (selections.length === 0) return;
+            
+            if (confirm('Êtes-vous sûr de vouloir supprimer toutes les sélections ?')) {
+                selections = [];
+                updateSelectionsList();
+                updateExtractButton();
+                redrawSelections();
+            }
+        }
+
+        function extractSelections() {
+            if (selections.length === 0) {
+                alert('Aucune sélection à extraire');
+                return;
+            }
+            
+            console.log('Starting extraction with selections:', selections);
+            
+            const button = document.getElementById('extract-btn');
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = '⏳ Extraction en cours...';
+            
+            const outputFormat = document.getElementById('format-select').value;
+            
+            const requestData = {
+                file_data: fileData,
+                selections: selections,
+                filename: '{{ filename }}',
+                output_format: outputFormat
+            };
+            
+            console.log('Sending request data:', requestData);
+            
+            fetch('/extract_sections', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        console.error('Error response:', text);
+                        let errorMsg;
+                        try {
+                            const errorData = JSON.parse(text);
+                            errorMsg = errorData.error || 'Erreur lors de l\'extraction';
+                        } catch {
+                            errorMsg = text || 'Erreur lors de l\'extraction';
+                        }
+                        throw new Error(errorMsg);
+                    });
+                }
+                
+                // Check if response is JSON (error) or blob (file)
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Erreur lors de l\'extraction');
+                    });
+                }
+                
+                // Get filename from headers
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = 'extraction.zip';
+                if (contentDisposition) {
+                    const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (matches && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                console.log('Download filename:', filename);
+                
+                return response.blob().then(blob => ({ blob, filename }));
+            })
+            .then(({ blob, filename }) => {
+                console.log('Blob received, size:', blob.size);
+                
+                // Create download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                // Show success message
+                alert('Extraction terminée ! Le fichier a été téléchargé.');
+                console.log('Download completed');
+            })
+            .catch(error => {
+                console.error('Extraction error:', error);
+                alert('Erreur lors de l\'extraction: ' + error.message);
+            })
+            .finally(() => {
+                button.disabled = false;
+                button.textContent = originalText;
+                console.log('Extraction process finished');
+            });
+        }
+
+        function debugSelections() {
+            console.log('=== DEBUG INFO ===');
+            console.log('Current page:', currentPage);
+            console.log('Current zoom:', currentZoom);
+            console.log('Page dimensions:', pageWidth, 'x', pageHeight);
+            console.log('Total selections:', selections.length);
+            console.log('Selections array:', JSON.stringify(selections, null, 2));
+            console.log('File data length:', fileData.length);
+            
+            if (selections.length > 0) {
+                alert(`Debug Info:
+- Sélections: ${selections.length}
+- Page actuelle: ${currentPage + 1}
+- Zoom: ${currentZoom}
+- Dimensions page: ${pageWidth}x${pageHeight}
+
+Voir la console (F12) pour plus de détails.`);
+            } else {
+                alert('Aucune sélection trouvée. Assurez-vous de dessiner un rectangle sur l\'image.');
+            }
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (e.target.tagName !== 'INPUT') {
+                    e.preventDefault();
+                    clearAllSelections();
+                }
+            }
+            
+            if (e.key === 'ArrowLeft' && e.target.tagName !== 'INPUT') {
+                e.preventDefault();
+                const currentPageNum = parseInt(document.getElementById('page-input').value);
+                if (currentPageNum > 1) {
+                    document.getElementById('page-input').value = currentPageNum - 1;
+                    loadPage();
+                }
+            }
+            
+            if (e.key === 'ArrowRight' && e.target.tagName !== 'INPUT') {
+                e.preventDefault();
+                const currentPageNum = parseInt(document.getElementById('page-input').value);
+                if (currentPageNum < totalPages) {
+                    document.getElementById('page-input').value = currentPageNum + 1;
+                    loadPage();
+                }
+            }
+        });
+
+        // Handle page input enter key
+        document.getElementById('page-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadPage();
+            }
+        });
+    </script>
+</body>
+</html>

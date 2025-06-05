@@ -1,69 +1,5 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify
-import os
-from werkzeug.utils import secure_filename
-import fitz  # PyMuPDF
-from io import BytesIO
-import zipfile
-from PIL import Image
-import base64
-import json
-
-app = Flask(__name__)
-app.secret_key = 'your-secret-key-here'
-
-# Configuration
-ALLOWED_EXTENSIONS = {'pdf'}
-MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB
-
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def get_pdf_page_as_image(file_data, page_num, zoom=2.0):
-    """Convert PDF page to image for display and selection"""
-    pdf_document = None
-    try:
-        pdf_document = fitz.open(stream=file_data, filetype="pdf")
-        
-        if page_num < 0 or page_num >= len(pdf_document):
-            raise ValueError(f"Page {page_num + 1} does not exist")
-        
-        page = pdf_document[page_num]
-        
-        # Get original page dimensions (in PDF units)
-        page_rect = page.rect
-        page_width = page_rect.width
-        page_height = page_rect.height
-        
-        print(f"Page {page_num + 1} original dimensions: {page_width} x {page_height}")
-        print(f"Rendering at zoom: {zoom}")
-        
-        # Create transformation matrix for zoom
-        mat = fitz.Matrix(zoom, zoom)
-        
-        # Render page as image
-        pix = page.get_pixmap(matrix=mat)
-        img_data = pix.tobytes("png")
-        
-        # Clean up pixmap
-        pix = None
-        
-        print(f"Image rendered successfully")
-        
-        return img_data, page_width, page_height, zoom
-        
-    except Exception as e:
-        raise Exception(f"Error rendering page: {str(e)}")
-    finally:
-        if pdf_document:
-            pdf_document.close()
-
 def extract_pdf_section(file_data, page_num, x, y, width, height, zoom=2.0, output_format='png'):
-    """Extract a specific section from a PDF page"""
-    pdf_document = None
-    new_doc = None
+    """Extract a specific section from a PDF page - FIXED VERSION"""
     try:
         pdf_document = fitz.open(stream=file_data, filetype="pdf")
         
@@ -80,11 +16,20 @@ def extract_pdf_section(file_data, page_num, x, y, width, height, zoom=2.0, outp
         print(f"Original page dimensions: {original_width} x {original_height}")
         print(f"Selection coordinates received: x={x}, y={y}, w={width}, h={height}")
         
+        # The coordinates are now already in PDF coordinate system from the frontend
+        # No need to convert from display coordinates since frontend does the conversion
+        pdf_x = x
+        pdf_y = y
+        pdf_width = width
+        pdf_height = height
+        
+        print(f"Using PDF coordinates directly: x={pdf_x}, y={pdf_y}, w={pdf_width}, h={pdf_height}")
+        
         # Ensure coordinates are within page bounds
-        pdf_x = max(0, min(x, original_width))
-        pdf_y = max(0, min(y, original_height))
-        pdf_width = min(width, original_width - pdf_x)
-        pdf_height = min(height, original_height - pdf_y)
+        pdf_x = max(0, min(pdf_x, original_width))
+        pdf_y = max(0, min(pdf_y, original_height))
+        pdf_width = min(pdf_width, original_width - pdf_x)
+        pdf_height = min(pdf_height, original_height - pdf_y)
         
         print(f"Clipped coordinates: x={pdf_x}, y={pdf_y}, w={pdf_width}, h={pdf_height}")
         
@@ -96,20 +41,26 @@ def extract_pdf_section(file_data, page_num, x, y, width, height, zoom=2.0, outp
         if output_format.lower() == 'pdf':
             # Create new PDF with just this section
             new_doc = fitz.open()
+            # Create page with the size of the cropped area
             new_page = new_doc.new_page(width=pdf_width, height=pdf_height)
             
-            # Insert the cropped area
+            # Calculate the source rectangle and destination rectangle
+            src_rect = rect
             dest_rect = fitz.Rect(0, 0, pdf_width, pdf_height)
-            new_page.show_pdf_page(dest_rect, pdf_document, page_num, clip=rect)
+            
+            # Insert the cropped area
+            new_page.show_pdf_page(dest_rect, pdf_document, page_num, clip=src_rect)
             
             output_buffer = BytesIO()
             new_doc.save(output_buffer)
+            new_doc.close()
             output_buffer.seek(0)
             
-            result = output_buffer.getvalue(), 'pdf'
-            return result
+            pdf_document.close()
+            return output_buffer.getvalue(), 'pdf'
         else:
             # Extract as image with high resolution
+            # Use higher zoom for extraction to get better quality
             extraction_zoom = 3.0
             mat = fitz.Matrix(extraction_zoom, extraction_zoom)
             
@@ -123,123 +74,50 @@ def extract_pdf_section(file_data, page_num, x, y, width, height, zoom=2.0, outp
             
             # Render the full page at high resolution
             pix = page.get_pixmap(matrix=mat)
-            img_data = pix.tobytes("png")
             
+            # Crop to the selected area
             # Convert to PIL Image for cropping
+            from PIL import Image
+            img_data = pix.tobytes("png")
             img = Image.open(BytesIO(img_data))
-            
-            # Clean up pixmap
-            pix = None
             
             # Crop the image to the selected rectangle
             crop_box = (
-                max(0, int(scaled_rect.x0)),
-                max(0, int(scaled_rect.y0)),
-                min(img.size[0], int(scaled_rect.x1)),
-                min(img.size[1], int(scaled_rect.y1))
+                int(scaled_rect.x0),
+                int(scaled_rect.y0),
+                int(scaled_rect.x1),
+                int(scaled_rect.y1)
             )
             
             print(f"Crop box: {crop_box}")
             print(f"Image size: {img.size}")
             
+            # Ensure crop box is within image bounds
+            crop_box = (
+                max(0, crop_box[0]),
+                max(0, crop_box[1]),
+                min(img.size[0], crop_box[2]),
+                min(img.size[1], crop_box[3])
+            )
+            
+            print(f"Adjusted crop box: {crop_box}")
+            
             cropped_img = img.crop(crop_box)
             
             # Convert back to bytes
             output_buffer = BytesIO()
-            cropped_img.save(output_buffer, format='PNG', optimize=True)
+            cropped_img.save(output_buffer, format='PNG')
             output_buffer.seek(0)
             
-            result = output_buffer.getvalue(), 'png'
-            return result
+            pdf_document.close()
+            return output_buffer.getvalue(), 'png'
         
     except Exception as e:
         raise Exception(f"Error extracting section: {str(e)}")
-    finally:
-        if new_doc:
-            new_doc.close()
-        if pdf_document:
-            pdf_document.close()
-
-@app.route('/', methods=['GET', 'POST'])
-def upload_file():
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('No file selected')
-            return redirect(request.url)
-        
-        file = request.files['file']
-        
-        if file.filename == '':
-            flash('No file selected')
-            return redirect(request.url)
-        
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            
-            pdf_document = None
-            try:
-                # Read file data into memory
-                file_data = file.read()
-                
-                # Get total pages
-                pdf_document = fitz.open(stream=file_data, filetype="pdf")
-                total_pages = len(pdf_document)
-                
-                return render_template('section_selector.html', 
-                                     filename=filename, 
-                                     total_pages=total_pages,
-                                     file_data=base64.b64encode(file_data).decode())
-                
-            except Exception as e:
-                flash(f'Error processing PDF: {str(e)}')
-                return redirect(request.url)
-            finally:
-                if pdf_document:
-                    pdf_document.close()
-        else:
-            flash('Invalid file type. Please upload a PDF file.')
-            return redirect(request.url)
-    
-    return render_template('section_upload.html')
-
-@app.route('/get_page_image', methods=['POST'])
-def get_page_image():
-    """Get page as image for selection interface"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'success': False, 'error': 'No data received'})
-            
-        file_data = base64.b64decode(data['file_data'])
-        page_num = data['page_num']
-        zoom = data.get('zoom', 1.5)
-        
-        print(f"Getting page {page_num + 1} with zoom {zoom}")
-        
-        img_data, page_width, page_height, actual_zoom = get_pdf_page_as_image(file_data, page_num, zoom)
-        
-        # Convert to base64 for display
-        img_b64 = base64.b64encode(img_data).decode()
-        
-        print(f"Page image generated successfully, size: {len(img_b64)} characters")
-        
-        return jsonify({
-            'success': True,
-            'image': f"data:image/png;base64,{img_b64}",
-            'page_width': page_width,
-            'page_height': page_height,
-            'zoom': actual_zoom
-        })
-        
-    except Exception as e:
-        print(f"Error in get_page_image: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/extract_sections', methods=['POST'])
 def extract_sections():
-    """Extract selected sections and create downloadable file"""
+    """Extract selected sections and create downloadable file - FIXED VERSION"""
     try:
         print("Extract sections endpoint called")
         data = request.get_json()
@@ -248,7 +126,7 @@ def extract_sections():
             print("No JSON data received")
             return jsonify({'success': False, 'error': 'No data received'}), 400
         
-        print(f"Received data keys: {list(data.keys())}")
+        print(f"Received data keys: {data.keys()}")
         
         file_data = base64.b64decode(data['file_data'])
         selections = data['selections']
@@ -267,6 +145,7 @@ def extract_sections():
             print(f"Processing selection {i+1}: {selection}")
             
             page_num = selection['page']
+            # Use the PDF coordinates directly (already converted in frontend)
             x = selection['x']
             y = selection['y']
             width = selection['width']
@@ -275,7 +154,7 @@ def extract_sections():
             
             print(f"Selection {i+1} coordinates - PDF: x={x}, y={y}, w={width}, h={height}")
             
-            # Extract the section
+            # Extract the section using PDF coordinates directly
             section_data, file_ext = extract_pdf_section(
                 file_data, page_num, x, y, width, height, zoom, output_format
             )
@@ -310,7 +189,7 @@ def extract_sections():
                 for file_info in extracted_files:
                     zip_file.writestr(file_info['filename'], file_info['data'])
                 
-                # Add info file
+                # Add info file with detailed selection information
                 info_content = f"Extracted sections from: {filename}\n"
                 info_content += f"Total sections: {len(extracted_files)}\n\n"
                 info_content += "Section Details:\n"
@@ -350,12 +229,3 @@ def extract_sections():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
-
-if __name__ == '__main__':
-    print("Starting PDF Section Extractor on port 1000...")
-    app.run(
-        debug=True,
-        port=1000,
-        host='0.0.0.0',
-        threaded=True
-    )

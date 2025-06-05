@@ -98,18 +98,24 @@
             min-height: 500px;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
+            padding: 10px;
         }
         #pdf-image {
             display: block;
             max-width: 100%;
             cursor: crosshair;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
         }
         .selection-box {
             position: absolute;
             border: 2px solid #ff0000;
             background-color: rgba(255, 0, 0, 0.1);
             pointer-events: none;
+            z-index: 1000;
         }
         .selections-list {
             max-height: 400px;
@@ -121,6 +127,10 @@
             border-radius: 5px;
             padding: 10px;
             margin-bottom: 10px;
+        }
+        .selection-item.current-page {
+            border-color: #4CAF50;
+            background-color: #f0f8f0;
         }
         .selection-item.active {
             border-color: #4CAF50;
@@ -153,6 +163,10 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        @keyframes flash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
         .instructions {
             background-color: #e7f3ff;
             border: 1px solid #b3d9ff;
@@ -165,6 +179,11 @@
             display: flex;
             gap: 5px;
             align-items: center;
+        }
+        .no-selections {
+            text-align: center;
+            color: #666;
+            padding: 20px;
         }
     </style>
 </head>
@@ -220,9 +239,12 @@
                 3. Cliquez sur "Extraire" pour télécharger
             </div>
 
-            <h3>Sélections ({{ 0 }})</h3>
-            <div id="selections-list" class="selections-list">
-                <p class="text-center text-muted">Aucune sélection pour le moment</p>
+            <h3>Sélections (<span id="selections-count">0</span>)</h3>
+            <div id="selections-container" class="selections-list">
+                <div class="no-selections">
+                    <p>Aucune sélection pour le moment</p>
+                    <small>Dessinez un rectangle sur l'image pour créer une sélection</small>
+                </div>
             </div>
 
             <div style="margin-top: 20px;">
@@ -240,6 +262,80 @@
     </div>
 
     <script>
+        // Custom alert function
+        function showCustomAlert(message) {
+            // Remove existing alerts
+            const existingAlert = document.getElementById('custom-alert');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+
+            // Create backdrop
+            const backdrop = document.createElement('div');
+            backdrop.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 9999;
+            `;
+
+            // Create alert dialog
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'custom-alert';
+            alertDiv.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: white;
+                border: 2px solid #ddd;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                z-index: 10000;
+                max-width: 400px;
+                text-align: center;
+                font-family: Arial, sans-serif;
+            `;
+
+            const messageP = document.createElement('p');
+            messageP.style.cssText = 'margin: 0 0 20px 0; color: #333; white-space: pre-line;';
+            messageP.textContent = message;
+
+            const okButton = document.createElement('button');
+            okButton.textContent = 'OK';
+            okButton.style.cssText = `
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 14px;
+            `;
+            okButton.onclick = function() {
+                backdrop.remove();
+                alertDiv.remove();
+            };
+
+            alertDiv.appendChild(messageP);
+            alertDiv.appendChild(okButton);
+            
+            backdrop.onclick = function() {
+                backdrop.remove();
+                alertDiv.remove();
+            };
+
+            document.body.appendChild(backdrop);
+            document.body.appendChild(alertDiv);
+            
+            // Focus OK button
+            okButton.focus();
+        }
+
         const fileData = '{{ file_data }}';
         const totalPages = {{ total_pages }};
         let currentPage = 0;
@@ -253,6 +349,7 @@
 
         // Load initial page
         window.onload = function() {
+            console.log('Window loaded, loading first page...');
             loadPage();
         };
 
@@ -260,8 +357,10 @@
             const pageNum = parseInt(document.getElementById('page-input').value) - 1;
             const zoom = parseFloat(document.getElementById('zoom-select').value);
             
+            console.log(`Loading page ${pageNum + 1} with zoom ${zoom}`);
+            
             if (pageNum < 0 || pageNum >= totalPages) {
-                alert('Numéro de page invalide');
+                alert('Numéro de page invalide.\n\nVeuillez entrer un numéro entre 1 et ' + totalPages + '.');
                 return;
             }
 
@@ -283,36 +382,64 @@
                     zoom: zoom
                 })
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('Response received:', response.status);
+                return response.json();
+            })
             .then(data => {
+                console.log('Data received:', data.success ? 'success' : 'error');
                 if (data.success) {
                     currentPage = pageNum;
                     currentZoom = data.zoom;
                     pageWidth = data.page_width;
                     pageHeight = data.page_height;
                     
+                    console.log('Page loaded:', {
+                        page: currentPage + 1,
+                        zoom: currentZoom,
+                        dimensions: pageWidth + 'x' + pageHeight
+                    });
+                    
                     const img = new Image();
                     img.onload = function() {
+                        console.log('Image loaded, setting up interface');
                         document.getElementById('pdf-container').innerHTML = '';
                         img.id = 'pdf-image';
                         img.style.cursor = 'crosshair';
+                        img.style.maxWidth = '100%';
+                        img.style.height = 'auto';
+                        img.style.userSelect = 'none';
+                        img.draggable = false;
                         document.getElementById('pdf-container').appendChild(img);
-                        setupSelectionEvents();
-                        redrawSelections();
+                        
+                        // Wait for image to be fully rendered
+                        setTimeout(() => {
+                            setupSelectionEvents();
+                            redrawSelections();
+                            console.log('Selection events setup complete');
+                        }, 100);
+                    };
+                    img.onerror = function() {
+                        console.error('Error loading image');
+                        document.getElementById('pdf-container').innerHTML = 
+                            '<div class="loading">Erreur de chargement de l\'image</div>';
                     };
                     img.src = data.image;
                 } else {
+                    console.error('Server error:', data.error);
                     document.getElementById('pdf-container').innerHTML = 
                         `<div class="loading">Erreur: ${data.error}</div>`;
                 }
             })
             .catch(error => {
+                console.error('Network error:', error);
                 document.getElementById('pdf-container').innerHTML = 
                     `<div class="loading">Erreur de chargement: ${error.message}</div>`;
             });
         }
 
         function changeZoom() {
+            console.log('Zoom changed, reloading page');
             loadPage();
         }
 
@@ -320,83 +447,176 @@
             const container = document.getElementById('pdf-container');
             const img = document.getElementById('pdf-image');
 
-            img.onmousedown = function(e) {
-                e.preventDefault();
-                isSelecting = true;
-                
-                const rect = img.getBoundingClientRect();
-                const containerRect = container.getBoundingClientRect();
-                
-                selectionStart = {
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top
-                };
+            if (!img || !container) {
+                console.error('Image or container not found');
+                return;
+            }
 
-                currentSelection = document.createElement('div');
-                currentSelection.className = 'selection-box';
-                currentSelection.style.left = selectionStart.x + 'px';
-                currentSelection.style.top = selectionStart.y + 'px';
-                currentSelection.style.width = '0px';
-                currentSelection.style.height = '0px';
-                container.appendChild(currentSelection);
-            };
+            console.log('Setting up selection events');
 
-            img.onmousemove = function(e) {
-                if (!isSelecting) return;
+            // Remove any existing event listeners
+            const newImg = img.cloneNode(true);
+            img.parentNode.replaceChild(newImg, img);
+            
+            const imageElement = document.getElementById('pdf-image');
+            
+            let isDrawing = false;
+            let startX = 0;
+            let startY = 0;
+            let currentSelectionBox = null;
+
+            // Prevent default drag behavior
+            imageElement.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+            });
+
+            // Mouse down event
+            function handleMouseDown(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('Mouse down at:', e.clientX, e.clientY);
+                
+                const rect = imageElement.getBoundingClientRect();
+                
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+                
+                console.log('Start position relative to image:', startX, startY);
+                
+                isDrawing = true;
+                
+                // Create selection box
+                currentSelectionBox = document.createElement('div');
+                currentSelectionBox.className = 'selection-box';
+                currentSelectionBox.style.left = startX + 'px';
+                currentSelectionBox.style.top = startY + 'px';
+                currentSelectionBox.style.width = '0px';
+                currentSelectionBox.style.height = '0px';
+                
+                // Make container relative and add selection box
+                container.style.position = 'relative';
+                container.appendChild(currentSelectionBox);
+                
+                console.log('Selection box created');
+            }
+
+            // Mouse move event
+            function handleMouseMove(e) {
+                if (!isDrawing || !currentSelectionBox) return;
                 
                 e.preventDefault();
-                const rect = img.getBoundingClientRect();
+                e.stopPropagation();
                 
+                const rect = imageElement.getBoundingClientRect();
                 const currentX = e.clientX - rect.left;
                 const currentY = e.clientY - rect.top;
                 
-                const width = Math.abs(currentX - selectionStart.x);
-                const height = Math.abs(currentY - selectionStart.y);
-                const left = Math.min(currentX, selectionStart.x);
-                const top = Math.min(currentY, selectionStart.y);
+                const width = Math.abs(currentX - startX);
+                const height = Math.abs(currentY - startY);
+                const left = Math.min(currentX, startX);
+                const top = Math.min(currentY, startY);
                 
-                currentSelection.style.left = left + 'px';
-                currentSelection.style.top = top + 'px';
-                currentSelection.style.width = width + 'px';
-                currentSelection.style.height = height + 'px';
-            };
+                currentSelectionBox.style.left = left + 'px';
+                currentSelectionBox.style.top = top + 'px';
+                currentSelectionBox.style.width = width + 'px';
+                currentSelectionBox.style.height = height + 'px';
+            }
 
-            img.onmouseup = function(e) {
-                if (!isSelecting) return;
+            // Mouse up event
+            function handleMouseUp(e) {
+                if (!isDrawing || !currentSelectionBox) return;
                 
-                isSelecting = false;
+                e.preventDefault();
+                e.stopPropagation();
                 
-                const rect = img.getBoundingClientRect();
+                console.log('Mouse up');
+                
+                const rect = imageElement.getBoundingClientRect();
                 const currentX = e.clientX - rect.left;
                 const currentY = e.clientY - rect.top;
                 
-                const width = Math.abs(currentX - selectionStart.x);
-                const height = Math.abs(currentY - selectionStart.y);
-                const left = Math.min(currentX, selectionStart.x);
-                const top = Math.min(currentY, selectionStart.y);
+                const width = Math.abs(currentX - startX);
+                const height = Math.abs(currentY - startY);
+                const left = Math.min(currentX, startX);
+                const top = Math.min(currentY, startY);
+                
+                console.log('Final selection dimensions:', { left, top, width, height });
+                
+                isDrawing = false;
                 
                 // Only add selection if it's big enough
                 if (width > 10 && height > 10) {
+                    // Get the actual displayed image dimensions
+                    const displayWidth = rect.width;
+                    const displayHeight = rect.height;
+                    
+                    // Calculate the scale factors between displayed image and original PDF
+                    const scaleX = pageWidth / displayWidth;
+                    const scaleY = pageHeight / displayHeight;
+                    
+                    // Convert display coordinates to PDF coordinates
+                    const pdfX = left * scaleX;
+                    const pdfY = top * scaleY;
+                    const pdfWidth = width * scaleX;
+                    const pdfHeight = height * scaleY;
+                    
                     const selection = {
                         page: currentPage,
-                        x: left,
-                        y: top,
-                        width: width,
-                        height: height,
+                        // Store display coordinates for UI
+                        displayX: left,
+                        displayY: top,
+                        displayWidth: width,
+                        displayHeight: height,
+                        // Store PDF coordinates for extraction
+                        x: pdfX,
+                        y: pdfY,
+                        width: pdfWidth,
+                        height: pdfHeight,
                         zoom: currentZoom,
+                        // Store scaling info for debugging
+                        scaleX: scaleX,
+                        scaleY: scaleY,
+                        pageWidth: pageWidth,
+                        pageHeight: pageHeight,
+                        displayImageWidth: displayWidth,
+                        displayImageHeight: displayHeight,
                         id: Date.now()
                     };
                     
+                    console.log('Adding selection:', selection);
+                    
                     selections.push(selection);
+                    
+                    // Add ID to the selection box for later reference
+                    currentSelectionBox.dataset.selectionId = selection.id;
+                    
                     updateSelectionsList();
                     updateExtractButton();
+                    
+                    console.log('Total selections:', selections.length);
                 } else {
                     // Remove the selection box if too small
-                    container.removeChild(currentSelection);
+                    if (currentSelectionBox && currentSelectionBox.parentNode) {
+                        container.removeChild(currentSelectionBox);
+                    }
+                    console.log('Selection too small, removed');
                 }
                 
-                currentSelection = null;
-            };
+                currentSelectionBox = null;
+            }
+
+            // Add event listeners
+            imageElement.addEventListener('mousedown', handleMouseDown);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            
+            // Prevent context menu
+            imageElement.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+            
+            console.log('Selection events attached');
         }
 
         function redrawSelections() {
@@ -404,47 +624,61 @@
             
             // Remove existing selection boxes
             const existingBoxes = container.querySelectorAll('.selection-box');
-            existingBoxes.forEach(box => container.removeChild(box));
+            existingBoxes.forEach(box => {
+                if (box.parentNode) {
+                    container.removeChild(box);
+                }
+            });
             
             // Redraw selections for current page
             selections.filter(s => s.page === currentPage).forEach(selection => {
                 const box = document.createElement('div');
                 box.className = 'selection-box';
-                box.style.left = selection.x + 'px';
-                box.style.top = selection.y + 'px';
-                box.style.width = selection.width + 'px';
-                box.style.height = selection.height + 'px';
+                box.style.left = selection.displayX + 'px';
+                box.style.top = selection.displayY + 'px';
+                box.style.width = selection.displayWidth + 'px';
+                box.style.height = selection.displayHeight + 'px';
                 box.dataset.selectionId = selection.id;
                 container.appendChild(box);
             });
+            
+            console.log(`Redrawn ${selections.filter(s => s.page === currentPage).length} selections for page ${currentPage + 1}`);
         }
 
         function updateSelectionsList() {
-            const listContainer = document.getElementById('selections-list');
-            const headerTitle = document.querySelector('.sidebar h3');
+            const listContainer = document.getElementById('selections-container');
+            const countSpan = document.getElementById('selections-count');
             
-            headerTitle.textContent = `Sélections (${selections.length})`;
+            countSpan.textContent = selections.length;
             
             if (selections.length === 0) {
-                listContainer.innerHTML = '<p class="text-center text-muted">Aucune sélection pour le moment</p>';
+                listContainer.innerHTML = `
+                    <div class="no-selections">
+                        <p>Aucune sélection pour le moment</p>
+                        <small>Dessinez un rectangle sur l'image pour créer une sélection</small>
+                    </div>
+                `;
                 return;
             }
             
             let html = '';
             selections.forEach((selection, index) => {
+                const isCurrentPage = selection.page === currentPage;
+                const pageIndicator = isCurrentPage ? '📍' : '📄';
+                
                 html += `
-                    <div class="selection-item" data-selection-id="${selection.id}">
+                    <div class="selection-item ${isCurrentPage ? 'current-page' : ''}" data-selection-id="${selection.id}">
                         <div class="selection-info">
-                            <strong>Section ${index + 1}</strong><br>
+                            <strong>${pageIndicator} Section ${index + 1}</strong><br>
                             Page: ${selection.page + 1}<br>
                             Position: (${Math.round(selection.x)}, ${Math.round(selection.y)})<br>
                             Taille: ${Math.round(selection.width)}×${Math.round(selection.height)}px
                         </div>
                         <div class="selection-actions">
-                            <button onclick="goToSelection(${selection.id})" class="btn-secondary" style="font-size: 11px;">
+                            <button onclick="goToSelection(${selection.id})" class="btn-secondary" style="font-size: 11px; padding: 4px 8px;">
                                 👁️ Voir
                             </button>
-                            <button onclick="removeSelection(${selection.id})" class="btn-danger" style="font-size: 11px;">
+                            <button onclick="removeSelection(${selection.id})" class="btn-danger" style="font-size: 11px; padding: 4px 8px;">
                                 🗑️ Supprimer
                             </button>
                         </div>
@@ -461,28 +695,57 @@
         }
 
         function goToSelection(selectionId) {
+            console.log('Going to selection:', selectionId);
             const selection = selections.find(s => s.id === selectionId);
-            if (!selection) return;
+            if (!selection) {
+                console.error('Selection not found:', selectionId);
+                return;
+            }
             
             // Change page if necessary
             if (selection.page !== currentPage) {
+                console.log(`Changing page from ${currentPage + 1} to ${selection.page + 1}`);
                 document.getElementById('page-input').value = selection.page + 1;
                 loadPage();
+                // The selection will be highlighted after page loads due to redrawSelections()
+            } else {
+                // Same page, just highlight
+                highlightSelection(selectionId);
+            }
+        }
+
+        function highlightSelection(selectionId) {
+            console.log('Highlighting selection:', selectionId);
+            
+            // Remove previous highlights
+            const selectionItems = document.querySelectorAll('.selection-item');
+            selectionItems.forEach(item => item.classList.remove('active'));
+            
+            // Highlight in sidebar
+            const targetItem = document.querySelector(`[data-selection-id="${selectionId}"]`);
+            if (targetItem) {
+                targetItem.classList.add('active');
+                targetItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
             
-            // Highlight the selection
-            setTimeout(() => {
-                const selectionItems = document.querySelectorAll('.selection-item');
-                selectionItems.forEach(item => item.classList.remove('active'));
+            // Highlight on PDF (flash effect)
+            const container = document.getElementById('pdf-container');
+            const selectionBox = container.querySelector(`[data-selection-id="${selectionId}"]`);
+            if (selectionBox) {
+                selectionBox.style.border = '3px solid #ff6b6b';
+                selectionBox.style.boxShadow = '0 0 20px rgba(255, 107, 107, 0.8)';
+                selectionBox.style.animation = 'flash 2s ease-in-out';
                 
-                const targetItem = document.querySelector(`[data-selection-id="${selectionId}"]`);
-                if (targetItem) {
-                    targetItem.classList.add('active');
-                }
-            }, 100);
+                setTimeout(() => {
+                    selectionBox.style.border = '2px solid #ff0000';
+                    selectionBox.style.boxShadow = 'none';
+                    selectionBox.style.animation = 'none';
+                }, 2000);
+            }
         }
 
         function removeSelection(selectionId) {
+            console.log('Removing selection:', selectionId);
             selections = selections.filter(s => s.id !== selectionId);
             updateSelectionsList();
             updateExtractButton();
@@ -497,12 +760,13 @@
                 updateSelectionsList();
                 updateExtractButton();
                 redrawSelections();
+                console.log('All selections cleared');
             }
         }
 
         function extractSelections() {
             if (selections.length === 0) {
-                alert('Aucune sélection à extraire');
+                alert('Aucune sélection à extraire.\n\nVeuillez d\'abord dessiner un rectangle sur l\'image.');
                 return;
             }
             
@@ -522,7 +786,11 @@
                 output_format: outputFormat
             };
             
-            console.log('Sending request data:', requestData);
+            console.log('Sending extraction request:', {
+                selectionsCount: selections.length,
+                outputFormat: outputFormat,
+                filename: '{{ filename }}'
+            });
             
             fetch('/extract_sections', {
                 method: 'POST',
@@ -533,7 +801,6 @@
             })
             .then(response => {
                 console.log('Response status:', response.status);
-                console.log('Response headers:', response.headers);
                 
                 if (!response.ok) {
                     return response.text().then(text => {
@@ -561,7 +828,7 @@
                 const contentDisposition = response.headers.get('content-disposition');
                 let filename = 'extraction.zip';
                 if (contentDisposition) {
-                    const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    const matches = contentDisposition.match(/filename[^;=\\n]*=((['"]).*?\\2|[^;\\n]*)/);
                     if (matches && matches[1]) {
                         filename = matches[1].replace(/['"]/g, '');
                     }
@@ -586,12 +853,12 @@
                 document.body.removeChild(a);
                 
                 // Show success message
-                alert('Extraction terminée ! Le fichier a été téléchargé.');
+                alert(`Extraction terminée !\n\nLe fichier "${filename}" a été téléchargé.\n\nVérifiez votre dossier de téléchargements.`);
                 console.log('Download completed');
             })
             .catch(error => {
                 console.error('Extraction error:', error);
-                alert('Erreur lors de l\'extraction: ' + error.message);
+                alert(`Erreur lors de l'extraction:\n\n${error.message}\n\nVérifiez la console (F12) pour plus de détails.`);
             })
             .finally(() => {
                 button.disabled = false;
@@ -610,13 +877,7 @@
             console.log('File data length:', fileData.length);
             
             if (selections.length > 0) {
-                alert(`Debug Info:
-- Sélections: ${selections.length}
-- Page actuelle: ${currentPage + 1}
-- Zoom: ${currentZoom}
-- Dimensions page: ${pageWidth}x${pageHeight}
-
-Voir la console (F12) pour plus de détails.`);
+                alert(`Debug Info:\n- Sélections: ${selections.length}\n- Page actuelle: ${currentPage + 1}\n- Zoom: ${currentZoom}\n- Dimensions page: ${pageWidth}x${pageHeight}\n\nVoir la console (F12) pour plus de détails.`);
             } else {
                 alert('Aucune sélection trouvée. Assurez-vous de dessiner un rectangle sur l\'image.');
             }
@@ -656,6 +917,8 @@ Voir la console (F12) pour plus de détails.`);
                 loadPage();
             }
         });
+
+        console.log('Script initialization complete');
     </script>
 </body>
 </html>
